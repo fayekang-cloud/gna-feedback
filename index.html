@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Playio 1:1 Feedback</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%234488FF'/><text y='.9em' x='50' text-anchor='middle' font-size='70'>🎮</text></svg>">
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel" data-type="module">
+const { useState, useEffect, useCallback } = React;
+
+/* ── utils ── */
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+const IOC = {
+  I: {
+    ko: "솔직", en: "Integrity", color: "#F5C518", bg: "rgba(245,197,24,.12)",
+    behaviors: [
+      { id: "I1", title: "선명한 직언은 성장의 밑거름", desc: "솔직하고 명확한 피드백은 성장을 이끄는 가장 강력한 도구입니다." },
+      { id: "I2", title: "오해의 소지는 만나서", desc: "얼굴을 맞대고 소통하며, 열린 마음으로 다양한 관점을 수용합니다." },
+      { id: "I3", title: "가감 없이, 무례하지 않게", desc: "사실을 있는 그대로 전달하되, 상대방의 감정을 배려합니다." },
+      { id: "I4", title: "솔직하게 한 걸음씩", desc: "정직한 마음가짐은 지속 가능한 성장의 토대가 됩니다." },
+    ],
+  },
+  O: {
+    ko: "오너십", en: "Ownership", color: "#0DE2E3", bg: "rgba(13,226,227,.12)",
+    behaviors: [
+      { id: "O1", title: "플레이오가 나의 자랑이 되도록", desc: "내가 하는 일의 영향력을 인지하며 최고의 결과물을 창출합니다." },
+      { id: "O2", title: "나다 싶으면 내가", desc: "'이건 내 일이다'라고 느끼며 주도적으로 책임지고 행동합니다." },
+      { id: "O3", title: "모든 일은 나의 커리어", desc: "우리가 하는 모든 일은 자신을 성장시키고, 팀의 성과를 이끕니다." },
+    ],
+  },
+  C: {
+    ko: "용기", en: "Courage", color: "#FF6B8A", bg: "rgba(255,107,138,.12)",
+    behaviors: [
+      { id: "C1", title: "실패는 또 다른 시작점", desc: "도전을 멈추지 않고, 배가 침몰하지 않을 정도의 실패를 허용합니다." },
+      { id: "C2", title: "주저함은 기회를 놓칠 뿐", desc: "문제가 정의되면 가장 빠른 해결 방법을 찾고 실행합니다." },
+      { id: "C3", title: "변화의 시작은 해오던 일로부터", desc: "끊임없이 진화하며 더 나은 결과를 위해 다르게 시도합니다." },
+    ],
+  },
+};
+
+function getBeh(id) {
+  if (!id) return null;
+  for (const [k, v] of Object.entries(IOC)) {
+    const b = v.behaviors.find(x => x.id === id);
+    if (b) return { ...b, cat: k, color: v.color, bg: v.bg, ko: v.ko };
+  }
+  return null;
+}
+
+/* ── storage helper ── */
+function sGet(key) {
+  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; } catch { return null; }
+}
+function sSet(key, val) {
+  try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
+}
+
+/* ── Google Sheets sync ── */
+async function gsSync(url, leader) {
+  if (!url) return null;
+  try {
+    const r = await fetch(url + "?action=get&leader=" + encodeURIComponent(leader));
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
+}
+
+async function gsPush(url, payload) {
+  if (!url) return;
+  try {
+    await fetch(url, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "data=" + encodeURIComponent(JSON.stringify(payload)),
+    });
+  } catch {}
+}
+
+/* ── CSS ── */
+const CSS = `
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+:root{--b:#4488FF;--t:#0DE2E3;--gd:#F5C518;--pk:#FF6B8A;--bk:#0B0F1E;--bk2:#141929;--bk3:#1C2137;--bk4:#252B42;--w:#FFF;--w9:rgba(255,255,255,.92);--w7:rgba(255,255,255,.7);--w5:rgba(255,255,255,.5);--w3:rgba(255,255,255,.3);--w1:rgba(255,255,255,.08);--w05:rgba(255,255,255,.04);--r:10px;--rs:7px}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Pretendard',-apple-system,sans-serif;background:var(--bk);color:var(--w9);-webkit-font-smoothing:antialiased;font-size:14px;line-height:1.55}
+.app{max-width:540px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column}
+.hd{padding:14px 20px;display:flex;align-items:center;gap:8px;position:sticky;top:0;z-index:100;background:var(--bk);border-bottom:1px solid var(--w1)}
+.hd h1{font-size:16px;font-weight:800;letter-spacing:-.4px}
+.hd h1 span{color:var(--w5);font-size:11px;font-weight:400;margin-left:5px}
+.tabs{display:flex;border-bottom:1px solid var(--w1);position:sticky;top:51px;z-index:90;background:var(--bk)}
+.tab{flex:1;padding:10px 0;border:0;background:0;color:var(--w3);font-size:13px;font-weight:500;cursor:pointer;font-family:inherit;position:relative;transition:color .1s}
+.tab.on{color:var(--w);font-weight:700}
+.tab.on::after{content:'';position:absolute;bottom:0;left:20%;right:20%;height:2px;background:var(--b);border-radius:1px}
+.ct{flex:1;padding-bottom:80px}
+
+/* member list */
+.ml-item{display:flex;align-items:center;gap:12px;padding:14px 20px;cursor:pointer;border-bottom:1px solid var(--w05);transition:background .1s}
+.ml-item:hover{background:var(--w05)}
+.ml-av{width:38px;height:38px;border-radius:50%;background:var(--bk3);border:1.5px solid var(--w1);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--w7);flex-shrink:0}
+.ml-info{flex:1}
+.ml-name{font-size:14px;font-weight:700}
+.ml-role{font-size:12px;color:var(--w5)}
+.ml-right{text-align:right}
+.ml-cnt{font-size:13px;font-weight:700;color:var(--b)}
+.ml-last{font-size:11px;color:var(--w3)}
+.ml-dots{display:flex;gap:3px;margin-top:3px;justify-content:flex-end}
+.ml-dot{width:6px;height:6px;border-radius:50%}
+
+/* detail */
+.md-top{padding:16px 20px;border-bottom:1px solid var(--w1)}
+.md-back{font-size:12px;color:var(--b);font-weight:600;cursor:pointer;border:0;background:0;font-family:inherit;margin-bottom:10px}
+.md-prof{display:flex;align-items:center;gap:12px}
+.md-av{width:44px;height:44px;border-radius:50%;background:var(--bk3);border:2px solid var(--w1);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:var(--w7)}
+.md-name{font-size:18px;font-weight:800}
+.md-role{font-size:12px;color:var(--w5)}
+.md-stats{display:flex;gap:6px;margin-top:14px}
+.md-stat{flex:1;padding:10px;border-radius:var(--rs);text-align:center;border:1px solid var(--w1)}
+.md-stat-v{font-size:18px;font-weight:800}
+.md-stat-l{font-size:10px;font-weight:600;margin-top:1px}
+
+.sec-lbl{font-size:11px;font-weight:700;color:var(--w3);padding:14px 20px 6px;letter-spacing:.5px}
+
+/* record */
+.rc{padding:14px 20px;border-bottom:1px solid var(--w05)}
+.rc-head{display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap}
+.rc-tag{font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px}
+.rc-date{font-size:11px;color:var(--w3)}
+.rc-agenda{font-size:14px;font-weight:700;margin-bottom:4px}
+.rc-body{font-size:13px;color:var(--w7);line-height:1.6;margin-bottom:4px}
+.rc-beh{font-size:11px;font-weight:600;padding:3px 10px;border-radius:var(--rs);display:inline-block;margin-bottom:6px}
+.rc-memo{font-size:12px;color:var(--w5);padding:8px 10px;background:var(--w05);border-radius:var(--rs);line-height:1.5;margin:6px 0}
+.rc-memo-lbl{font-size:10px;font-weight:700;color:var(--w3);margin-bottom:3px}
+.rc-act{display:flex;align-items:flex-start;gap:8px;padding:3px 0;font-size:12px}
+.rc-chk{width:16px;height:16px;border-radius:50%;border:2px solid var(--w3);flex-shrink:0;margin-top:1px;cursor:pointer;display:flex;align-items:center;justify-content:center;background:0;transition:all .12s}
+.rc-chk.done{background:var(--b);border-color:var(--b)}
+.rc-act-t{color:var(--w7)}.rc-act-t.done{text-decoration:line-through;color:var(--w3)}
+.rc-toggle{border:0;background:0;color:var(--w3);cursor:pointer;font-size:11px;font-family:inherit;margin-left:auto}
+
+/* ioc guide */
+.ioc-sec{padding:20px}
+.ioc-hdr{padding:8px 14px;border-radius:var(--rs);margin-bottom:10px;font-size:13px;font-weight:700}
+.ioc-beh{padding:0 0 12px;margin-bottom:12px;border-bottom:1px solid var(--w05)}
+.ioc-beh:last-child{border:0;margin:0;padding:0}
+.ioc-beh-t{font-size:14px;font-weight:800;margin-bottom:3px}
+.ioc-beh-d{font-size:12px;color:var(--w5);line-height:1.55}
+
+/* settings */
+.set-sec{padding:20px}
+.set-t{font-size:15px;font-weight:800;margin-bottom:14px}
+.set-sub{font-size:11px;font-weight:700;color:var(--w3);margin-bottom:6px;margin-top:16px}
+.set-member{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--w05)}
+.set-member-info{flex:1}
+.set-member-name{font-size:13px;font-weight:700}
+.set-member-role{font-size:11px;color:var(--w5)}
+.set-member-rm{border:0;background:0;color:var(--pk);cursor:pointer;font-size:11px;font-family:inherit;font-weight:600}
+.set-add-row{display:flex;gap:6px;margin-top:8px}
+.set-sync{margin-top:16px;padding:12px;border-radius:var(--rs);background:var(--w05);border:1px solid var(--w1)}
+.set-sync-status{font-size:11px;margin-top:6px}
+
+/* form */
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:200;display:flex;align-items:flex-end;justify-content:center}
+.mo{background:var(--bk2);border-radius:14px 14px 0 0;width:100%;max-width:540px;max-height:92vh;overflow-y:auto;padding:16px 20px 28px}
+.mo-bar{width:32px;height:4px;background:var(--w1);border-radius:2px;margin:0 auto 12px}
+.mo-t{font-size:16px;font-weight:800;margin-bottom:14px}
+
+.fg{margin-bottom:12px}
+.fl{display:block;font-size:11px;font-weight:700;color:var(--w5);margin-bottom:4px}
+.fl small{font-weight:400;color:var(--w3);margin-left:3px}
+.inp{width:100%;padding:9px 10px;border:1.5px solid var(--w1);border-radius:var(--rs);font-size:13px;font-family:inherit;color:var(--w9);outline:0;transition:border .12s;background:var(--bk3)}
+.inp:focus{border-color:var(--b)}
+.inp::placeholder{color:var(--w3)}
+.inp-sm{padding:7px 9px;font-size:12px}
+.ta{resize:vertical;min-height:56px;line-height:1.55}
+
+.pill-r{display:flex;gap:5px;flex-wrap:wrap}
+.pill{padding:6px 12px;border-radius:16px;font-size:12px;font-weight:600;border:1.5px solid var(--w1);cursor:pointer;transition:all .12s;background:0;font-family:inherit;color:var(--w5)}
+.pill.on{color:var(--bk)!important;border-color:transparent}
+
+.beh-sel{margin-top:6px;display:flex;flex-direction:column;gap:4px}
+.beh-opt{padding:7px 10px;border-radius:var(--rs);border:1.5px solid var(--w1);cursor:pointer;transition:all .12s;background:0}
+.beh-opt:hover{border-color:var(--w3)}
+.beh-opt.on{border-width:2px}
+.beh-opt-t{font-size:12px;font-weight:700}
+.beh-opt-d{font-size:11px;color:var(--w3);margin-top:1px}
+
+.act-add{display:flex;gap:6px;margin-top:4px}
+.act-list{margin-top:4px}
+.act-item{display:flex;align-items:center;gap:6px;padding:2px 0;font-size:12px;color:var(--w7)}
+.act-rm{border:0;background:0;color:var(--w3);cursor:pointer;font-size:11px;font-family:inherit}
+
+.btn-r{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
+.btn{padding:9px 20px;border:0;border-radius:var(--rs);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .12s}
+.btn-c{background:var(--w1);color:var(--w5)}.btn-s{background:var(--b);color:#fff}
+.btn-s:disabled{opacity:.3;cursor:default}
+.btn-sm{padding:6px 12px;font-size:12px}
+.btn-outline{background:0;border:1.5px solid var(--b);color:var(--b)}
+
+/* dashboard */
+.db-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:16px 20px 0}
+.db-card{padding:14px 10px;border-radius:var(--rs);text-align:center;border:1px solid var(--w1);background:var(--bk2)}
+.db-card-v{font-size:24px;font-weight:800;letter-spacing:-1px}
+.db-card-l{font-size:10px;font-weight:600;color:var(--w3);margin-top:2px}
+.db-section{padding:12px 20px}
+.db-section-t{font-size:12px;font-weight:700;color:var(--w3);margin-bottom:8px;letter-spacing:.3px}
+.db-bar-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.db-bar-label{font-size:12px;font-weight:600;color:var(--w7);width:56px;flex-shrink:0;text-align:right}
+.db-bar-track{flex:1;height:8px;background:var(--w05);border-radius:4px;overflow:hidden}
+.db-bar-fill{height:100%;border-radius:4px;transition:width .3s}
+.db-bar-count{font-size:11px;font-weight:700;color:var(--w5);width:24px;text-align:right}
+.db-member-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--w05)}
+.db-member-row:last-child{border:0}
+.db-m-av{width:28px;height:28px;border-radius:50%;background:var(--bk3);border:1px solid var(--w1);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--w5);flex-shrink:0}
+.db-m-name{font-size:13px;font-weight:600;flex:1}
+.db-m-cnt{font-size:13px;font-weight:700;color:var(--b)}
+.db-m-ago{font-size:11px;color:var(--w3)}
+.db-alert{padding:8px 12px;border-radius:var(--rs);background:rgba(255,107,138,.1);border:1px solid rgba(255,107,138,.2);font-size:12px;color:var(--pk);margin-bottom:6px;display:flex;align-items:center;gap:6px}
+.db-recent{padding:10px 0;border-bottom:1px solid var(--w05)}
+.db-recent:last-child{border:0}
+.db-recent-head{display:flex;align-items:center;gap:6px;margin-bottom:3px}
+.db-recent-body{font-size:12px;color:var(--w5);line-height:1.5;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+
+.fab{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);height:44px;padding:0 20px;border-radius:22px;background:var(--b);color:#fff;border:0;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 3px 16px rgba(68,136,255,.35);z-index:50;display:flex;align-items:center;gap:6px;font-family:inherit;transition:transform .12s}
+.fab:hover{transform:translateX(-50%) scale(1.03)}
+.empty{text-align:center;padding:40px 20px;color:var(--w3)}
+.empty b{display:block;font-size:24px;margin-bottom:4px;opacity:.25}
+.empty p{font-size:13px;line-height:1.5}
+.toast{position:fixed;top:60px;left:50%;transform:translateX(-50%);background:var(--bk4);color:var(--w9);padding:8px 16px;border-radius:20px;font-size:12px;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,.3);z-index:300;animation:fadeInOut 2s forwards}
+@keyframes fadeInOut{0%{opacity:0;transform:translateX(-50%) translateY(-8px)}10%{opacity:1;transform:translateX(-50%) translateY(0)}80%{opacity:1}100%{opacity:0}}
+`;
+
+function Logo() {
+  return (
+    <svg width="26" height="18" viewBox="0 0 26 18" fill="none">
+      <path d="M3 6.5C3 4.2 5 2.5 7.5 2.5h11c2.5 0 4.5 1.7 4.5 4v2.5c0 2.3-2 4-4.5 4h-11C5 13 3 11.3 3 9V6.5z" fill="#fff" fillOpacity=".15"/>
+      <path d="M8.5 6l2.5 2.2-2.5 2.2V6z" fill="#4488FF"/>
+      <circle cx="16.5" cy="8.2" r="1.7" fill="#FF6B8A"/>
+    </svg>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════ */
+
+function App() {
+  const [settings, setSettings] = useState({ leaderName: "", scriptUrl: "" });
+  const [members, setMembers] = useState([]);
+  const [records, setRecords] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [tab, setTab] = useState("values");
+  const [view, setView] = useState("list");
+  const [selM, setSelM] = useState(null);
+  const [compose, setCompose] = useState(false);
+  const [toast, setToast] = useState("");
+
+  /* ── load ── */
+  useEffect(() => {
+    (async () => {
+      const s = sGet("playio-settings");
+      const m = sGet("playio-members");
+      const r = sGet("playio-records");
+      if (s) setSettings(s);
+      if (m) setMembers(m);
+      if (r) setRecords(r);
+      setLoaded(true);
+    })();
+  }, []);
+
+  /* ── save ── */
+  useEffect(() => { if (loaded) sSet("playio-settings", settings); }, [settings, loaded]);
+  useEffect(() => { if (loaded) sSet("playio-members", members); }, [members, loaded]);
+  useEffect(() => { if (loaded) sSet("playio-records", records); }, [records, loaded]);
+
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2200); };
+
+  /* ── Google Sheets sync ── */
+  const syncToSheet = useCallback(async (newRec) => {
+    if (!settings.scriptUrl) return;
+    await gsPush(settings.scriptUrl, {
+      action: "addRecord",
+      leader: settings.leaderName,
+      record: newRec,
+    });
+  }, [settings]);
+
+  const syncFromSheet = useCallback(async () => {
+    if (!settings.scriptUrl || !settings.leaderName) { showToast("스크립트 URL과 이름을 먼저 입력하세요"); return; }
+    showToast("동기화 중...");
+    const result = await gsSync(settings.scriptUrl, settings.leaderName);
+    if (result?.records) {
+      setRecords(prev => {
+        const ids = new Set(prev.map(r => r.id));
+        const merged = [...prev, ...result.records.filter(r => !ids.has(r.id))];
+        return merged.sort((a, b) => b.date - a.date);
+      });
+      showToast("동기화 완료 ✓");
+    } else {
+      showToast("동기화 실패 — URL을 확인하세요");
+    }
+  }, [settings]);
+
+  const pushAllToSheet = useCallback(async () => {
+    if (!settings.scriptUrl) return;
+    await gsPush(settings.scriptUrl, {
+      action: "pushAll",
+      leader: settings.leaderName,
+      members,
+      records,
+    });
+    showToast("시트에 전체 업로드 완료 ✓");
+  }, [settings, members, records]);
+
+  /* ── handlers ── */
+  const addMember = (name, role) => {
+    if (!name.trim()) return;
+    const m = { id: uid(), name: name.trim(), role: role.trim(), initial: name.trim()[0] };
+    setMembers(p => [...p, m]);
+  };
+  const removeMember = (id) => setMembers(p => p.filter(m => m.id !== id));
+
+  const addRecord = (rec) => {
+    setRecords(p => [rec, ...p]);
+    syncToSheet(rec);
+    showToast("저장됨 ✓");
+  };
+
+  const toggleAction = (rId, aId) => {
+    setRecords(p => p.map(r => r.id === rId ? { ...r, actions: r.actions.map(a => a.id === aId ? { ...a, done: !a.done } : a) } : r));
+  };
+
+  const openM = (m) => { setSelM(m); setView("detail"); };
+  const goList = () => { setView("list"); setSelM(null); };
+
+  const getRecs = (mId) => records.filter(r => r.memberId === mId).sort((a, b) => b.date - a.date);
+  const getStats = (mId) => {
+    const recs = getRecs(mId);
+    const cats = {};
+    recs.forEach(r => { const b = getBeh(r.behaviorId); if (b) cats[b.cat] = (cats[b.cat]||0)+1; });
+    return { total: recs.length, last: recs[0]?.date, cats };
+  };
+
+  const fmt = (t) => { const d = new Date(t); return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,"0")}.${String(d.getDate()).padStart(2,"0")}`; };
+
+  if (!loaded) return <div className="app"><style>{CSS}</style><div style={{padding:40,textAlign:"center",color:"var(--w3)"}}>로딩 중...</div></div>;
+
+  return (
+    <div className="app">
+      <style>{CSS}</style>
+
+      <div className="hd">
+        <Logo />
+        <h1>1:1 Feedback<span>Playio</span></h1>
+        {settings.leaderName && <span style={{marginLeft:"auto",fontSize:12,color:"var(--w3)"}}>{settings.leaderName}</span>}
+      </div>
+
+      <div className="tabs">
+        <button className={`tab ${tab==="values"?"on":""}`} onClick={() => setTab("values")}>가이드</button>
+        <button className={`tab ${tab==="members"?"on":""}`} onClick={() => {setTab("members");goList();}}>1on1</button>
+        <button className={`tab ${tab==="dash"?"on":""}`} onClick={() => setTab("dash")}>대시보드</button>
+        <button className={`tab ${tab==="settings"?"on":""}`} onClick={() => setTab("settings")}>설정</button>
+      </div>
+
+      <div className="ct">
+        {/* ── Settings ── */}
+        {tab === "settings" && (
+          <SettingsView
+            settings={settings}
+            members={members}
+            onUpdateSettings={setSettings}
+            onAddMember={addMember}
+            onRemoveMember={removeMember}
+            onSync={syncFromSheet}
+            onPushAll={pushAllToSheet}
+          />
+        )}
+
+        {/* ── Guide Tab: 1on1 진행법 + 핵심가치 ── */}
+        {tab === "values" && (
+          <div>
+            {/* 1on1 진행 가이드 */}
+            <div className="ioc-sec">
+              <div className="ioc-hdr" style={{ background: "rgba(68,136,255,.12)", color: "var(--b)" }}>1on1 피드백 진행 가이드</div>
+              
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: "var(--w9)" }}>시작 전 체크</div>
+                {["이번 1on1에서 꼭 다루고 싶은 아젠다가 있는가?", "지난 1on1 이후 약속한 액션 아이템의 진행 상황은?", "최근 관찰한 팀원의 행동 중 IOC와 연결되는 것은?"].map((t, i) => (
+                  <div key={i} style={{ display: "flex", gap: 8, padding: "4px 0", fontSize: 13, color: "var(--w5)" }}>
+                    <span style={{ color: "var(--b)", fontWeight: 700, flexShrink: 0 }}>{i+1}.</span>{t}
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: "var(--w9)" }}>피드백 구조 — SBI</div>
+                {[
+                  { tag: "S", label: "Situation", desc: "언제, 어디서 일어난 일인지 구체적으로", color: "#4488FF" },
+                  { tag: "B", label: "Behavior", desc: "관찰된 행동만 (판단·평가 배제)", color: "#0DE2E3" },
+                  { tag: "I", label: "Impact", desc: "팀·결과에 미친 영향", color: "#FF6B8A" },
+                ].map(s => (
+                  <div key={s.tag} style={{ display: "flex", gap: 8, padding: "5px 0", fontSize: 13 }}>
+                    <span style={{ width: 20, height: 20, borderRadius: 4, background: s.color, color: "#fff", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{s.tag}</span>
+                    <div><span style={{ fontWeight: 700, color: "var(--w9)" }}>{s.label}</span> <span style={{ color: "var(--w5)" }}>— {s.desc}</span></div>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: "var(--w9)" }}>1on1 흐름</div>
+                {[
+                  { step: "오프닝", desc: "안부 확인 → 아젠다 공유" },
+                  { step: "지난 액션 리뷰", desc: "이전 약속 진행 상황 확인" },
+                  { step: "피드백 교환", desc: "SBI 기반으로 구체적 피드백" },
+                  { step: "다음 액션 합의", desc: "다음까지 할 일 정하기" },
+                  { step: "클로징", desc: "요약 + 응원 한마디" },
+                ].map((s, i) => (
+                  <div key={i} style={{ display: "flex", gap: 8, padding: "4px 0", fontSize: 13 }}>
+                    <span style={{ width: 20, height: 20, borderRadius: 10, background: "var(--w1)", color: "var(--w5)", fontSize: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{i+1}</span>
+                    <div><span style={{ fontWeight: 700, color: "var(--w9)" }}>{s.step}</span> <span style={{ color: "var(--w3)" }}>— {s.desc}</span></div>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ padding: 10, borderRadius: "var(--rs)", background: "var(--w05)", border: "1px solid var(--w1)" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "var(--gd)", marginBottom: 4 }}>💡 리마인더</div>
+                <div style={{ fontSize: 12, color: "var(--w5)", lineHeight: 1.6 }}>
+                  피드백은 <span style={{color:"var(--w9)",fontWeight:600}}>평가가 아니라 성장의 도구</span>입니다.<br/>
+                  "요즘 좀 열심히 안 하는 것 같아" (X)<br/>
+                  "어제 미팅에서 자료를 안 가져와서 신뢰도가 떨어졌어" (O)
+                </div>
+                <div style={{ fontSize: 12, color: "var(--w5)", lineHeight: 1.6, marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--w1)" }}>
+                  <span style={{color:"var(--t)",fontWeight:600}}>칭찬도 피드백입니다.</span><br/>
+                  잘한 행동을 구체적으로 짚어주면 그 행동이 반복됩니다.<br/>
+                  "수고했어요" (X) → 무엇을 잘했는지 모름<br/>
+                  "오늘 회의에서 데이터로 근거를 제시한 부분이 설득력 있었어요" (O)
+                </div>
+                <div style={{ fontSize: 12, color: "var(--w5)", lineHeight: 1.6, marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--w1)" }}>
+                  <span style={{color:"var(--b)",fontWeight:600}}>1on1은 주기적으로 진행하세요.</span><br/>
+                  격주 또는 최소 월 1회, 고정된 시간에 반복하는 것이 핵심입니다.<br/>
+                  한 번의 긴 면담보다 짧더라도 꾸준한 대화가 신뢰를 만듭니다.<br/>
+                  캘린더에 반복 일정으로 잡아두면 자연스럽게 루틴이 됩니다.
+                </div>
+              </div>
+            </div>
+
+            {/* 핵심가치 IOC */}
+            <div className="ioc-sec" style={{ paddingBottom: 0 }}>
+              <div className="ioc-hdr" style={{ background: "rgba(255,255,255,.08)", color: "var(--w9)" }}>GNA 핵심가치</div>
+              <div style={{ fontSize: 12, color: "var(--w3)", lineHeight: 1.5 }}>GNA 크루는 핵심가치를 구체적으로 실천하기 위한 행동 양식 10가지를 약속하였습니다.</div>
+            </div>
+            {Object.entries(IOC).map(([k, v]) => (
+              <div className="ioc-sec" key={k}>
+                <div className="ioc-hdr" style={{ background: v.bg, color: v.color }}>{v.ko} {v.en}</div>
+                {v.behaviors.map(b => (
+                  <div className="ioc-beh" key={b.id}>
+                    <div className="ioc-beh-t">{b.title}</div>
+                    <div className="ioc-beh-d">{b.desc}</div>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ── Dashboard ── */}
+        {tab === "dash" && (
+          <DashboardView members={members} records={records} fmt={fmt} />
+        )}
+
+        {/* ── Members List ── */}
+        {tab === "members" && view === "list" && (
+          <div>
+            {members.length === 0 ? (
+              <div className="empty">
+                <b>👥</b>
+                <p>아직 팀원이 없습니다.<br />설정 탭에서 팀원을 추가하세요.</p>
+              </div>
+            ) : (
+              members.map(m => {
+                const st = getStats(m.id);
+                return (
+                  <div className="ml-item" key={m.id} onClick={() => openM(m)}>
+                    <div className="ml-av">{m.initial}</div>
+                    <div className="ml-info">
+                      <div className="ml-name">{m.name}</div>
+                      <div className="ml-role">{m.role}</div>
+                    </div>
+                    <div className="ml-right">
+                      <div className="ml-cnt">{st.total > 0 ? `${st.total}회` : "—"}</div>
+                      {st.last && <div className="ml-last">{fmt(st.last)}</div>}
+                      <div className="ml-dots">
+                        {Object.entries(st.cats).map(([c, n]) =>
+                          Array.from({ length: Math.min(n, 5) }).map((_, i) => (
+                            <div key={c+i} className="ml-dot" style={{ background: IOC[c].color }} />
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
+
+        {/* ── Member Detail ── */}
+        {tab === "members" && view === "detail" && selM && (
+          <MemberDetail member={selM} records={getRecs(selM.id)} onBack={goList} onToggle={toggleAction} fmt={fmt} />
+        )}
+      </div>
+
+      {tab !== "settings" && (
+        <button className="fab" onClick={() => { if (members.length === 0) { showToast("팀원을 먼저 추가하세요"); return; } setCompose(true); }}>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round"><line x1="7" y1="2" x2="7" y2="12"/><line x1="2" y1="7" x2="12" y2="7"/></svg>
+          1:1 기록
+        </button>
+      )}
+
+      {compose && (
+        <ComposeModal
+          members={members}
+          preselect={selM?.id || ""}
+          leaderName={settings.leaderName}
+          onClose={() => setCompose(false)}
+          onSave={(r) => { addRecord(r); setCompose(false); }}
+        />
+      )}
+
+      {toast && <div className="toast">{toast}</div>}
+    </div>
+  );
+}
+
+/* ═══ Settings ═══ */
+/* ═══ Dashboard ═══ */
+function DashboardView({ members, records, fmt }) {
+  const now = Date.now();
+  const thisMonth = records.filter(r => {
+    const d = new Date(r.date);
+    const n = new Date();
+    return d.getMonth() === n.getMonth() && d.getFullYear() === n.getFullYear();
+  }).length;
+
+  const iocCounts = { I: 0, O: 0, C: 0 };
+  records.forEach(r => { const b = getBeh(r.behaviorId); if (b) iocCounts[b.cat]++; });
+  const maxIoc = Math.max(...Object.values(iocCounts), 1);
+
+  const completedActions = records.flatMap(r => (r.actions || []).filter(a => a.done)).length;
+  const totalActions = records.flatMap(r => r.actions || []).length;
+
+  // per-member stats
+  const memberStats = members.map(m => {
+    const recs = records.filter(r => r.memberId === m.id);
+    const last = recs.sort((a, b) => b.date - a.date)[0]?.date;
+    const daysSince = last ? Math.floor((now - last) / 86400e3) : null;
+    return { ...m, count: recs.length, last, daysSince };
+  }).sort((a, b) => (a.daysSince ?? 999) - (b.daysSince ?? 999));
+
+  const needsAttention = memberStats.filter(m => m.daysSince === null || m.daysSince >= 14);
+
+  const recentRecords = [...records].sort((a, b) => b.date - a.date).slice(0, 5);
+
+  return (
+    <div>
+      {/* summary cards */}
+      <div className="db-grid">
+        <div className="db-card">
+          <div className="db-card-v" style={{ color: "var(--b)" }}>{records.length}</div>
+          <div className="db-card-l">전체 기록</div>
+        </div>
+        <div className="db-card">
+          <div className="db-card-v" style={{ color: "var(--t)" }}>{thisMonth}</div>
+          <div className="db-card-l">이번 달</div>
+        </div>
+        <div className="db-card">
+          <div className="db-card-v" style={{ color: totalActions > 0 && completedActions === totalActions ? "var(--t)" : "var(--gd)" }}>
+            {totalActions > 0 ? Math.round((completedActions / totalActions) * 100) + "%" : "—"}
+          </div>
+          <div className="db-card-l">액션 완료율</div>
+        </div>
+      </div>
+
+      {/* alerts */}
+      {needsAttention.length > 0 && (
+        <div className="db-section">
+          <div className="db-section-t">⚠️ 1on1 리마인드</div>
+          {needsAttention.map(m => (
+            <div className="db-alert" key={m.id}>
+              <span style={{ fontWeight: 700 }}>{m.name}</span>
+              <span>{m.daysSince === null ? "아직 1on1 기록 없음" : `${m.daysSince}일 전 마지막 진행`}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* IOC distribution */}
+      <div className="db-section">
+        <div className="db-section-t">핵심가치 분포</div>
+        {Object.entries(IOC).map(([k, v]) => (
+          <div className="db-bar-row" key={k}>
+            <div className="db-bar-label" style={{ color: v.color }}>{v.ko}</div>
+            <div className="db-bar-track">
+              <div className="db-bar-fill" style={{ width: `${(iocCounts[k] / maxIoc) * 100}%`, background: v.color }} />
+            </div>
+            <div className="db-bar-count">{iocCounts[k]}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* per member */}
+      <div className="db-section">
+        <div className="db-section-t">팀원별 현황</div>
+        {memberStats.length === 0 ? (
+          <div className="empty"><b>👥</b><p>팀원을 추가하세요</p></div>
+        ) : (
+          memberStats.map(m => (
+            <div className="db-member-row" key={m.id}>
+              <div className="db-m-av">{m.initial}</div>
+              <div className="db-m-name">{m.name}</div>
+              <div className="db-m-cnt">{m.count}회</div>
+              <div className="db-m-ago">{m.last ? (m.daysSince === 0 ? "오늘" : `${m.daysSince}일 전`) : "—"}</div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* recent */}
+      <div className="db-section">
+        <div className="db-section-t">최근 기록</div>
+        {recentRecords.length === 0 ? (
+          <div className="empty"><b>📝</b><p>기록이 없습니다</p></div>
+        ) : (
+          recentRecords.map(r => {
+            const beh = getBeh(r.behaviorId);
+            const member = members.find(m => m.id === r.memberId);
+            return (
+              <div className="db-recent" key={r.id}>
+                <div className="db-recent-head">
+                  <span className="rc-tag" style={{ background: "rgba(68,136,255,.12)", color: "var(--b)" }}>1:1</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "var(--w9)" }}>{member?.name || "—"}</span>
+                  <span className="rc-date">{fmt(r.date)}</span>
+                  {beh && <span className="rc-tag" style={{ background: beh.bg, color: beh.color }}>{beh.ko}</span>}
+                </div>
+                <div className="db-recent-body">{r.agenda ? `${r.agenda} — ` : ""}{r.content}</div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ═══ Settings ═══ */
+function SettingsView({ settings, members, onUpdateSettings, onAddMember, onRemoveMember, onSync, onPushAll }) {
+  const [name, setName] = useState("");
+  const [role, setRole] = useState("");
+
+  return (
+    <div className="set-sec">
+      <div className="set-t">기본 설정</div>
+
+      <div className="fg">
+        <label className="fl">내 이름 (팀장)</label>
+        <input className="inp" placeholder="홍길동" value={settings.leaderName} onChange={e => onUpdateSettings(p => ({...p, leaderName: e.target.value}))} />
+      </div>
+
+      <div className="set-sub">팀원 관리 ({members.length}명)</div>
+      {members.map(m => (
+        <div className="set-member" key={m.id}>
+          <div className="ml-av" style={{width:30,height:30,fontSize:12}}>{m.initial}</div>
+          <div className="set-member-info">
+            <div className="set-member-name">{m.name}</div>
+            <div className="set-member-role">{m.role}</div>
+          </div>
+          <button className="set-member-rm" onClick={() => onRemoveMember(m.id)}>삭제</button>
+        </div>
+      ))}
+
+      <div className="set-add-row">
+        <input className="inp inp-sm" style={{flex:1}} placeholder="이름" value={name} onChange={e => setName(e.target.value)} />
+        <input className="inp inp-sm" style={{flex:1}} placeholder="역할" value={role} onChange={e => setRole(e.target.value)} />
+        <button className="btn btn-sm btn-s" onClick={() => { onAddMember(name, role); setName(""); setRole(""); }}>추가</button>
+      </div>
+
+      <div className="set-sub" style={{marginTop:24}}>Google Sheets 연동</div>
+      <div className="set-sync">
+        <div style={{fontSize:11,color:"var(--w3)",marginBottom:8,lineHeight:1.5}}>
+          각 팀장별로 <span style={{color:"var(--t)",fontWeight:600}}>개인 전용 시트</span>가 생성됩니다. 다른 팀장의 데이터와 완전히 분리됩니다.
+        </div>
+        <div className="fg" style={{marginBottom:8}}>
+          <label className="fl">내 전용 Apps Script URL <small>가이드 참고하여 본인 시트에서 배포</small></label>
+          <input className="inp inp-sm" placeholder="https://script.google.com/macros/s/..." value={settings.scriptUrl} onChange={e => onUpdateSettings(p => ({...p, scriptUrl: e.target.value}))} />
+        </div>
+        <div style={{display:"flex",gap:6}}>
+          <button className="btn btn-sm btn-outline" onClick={onSync}>시트에서 불러오기</button>
+          <button className="btn btn-sm btn-outline" onClick={onPushAll}>시트에 전체 업로드</button>
+        </div>
+        <div className="set-sync-status" style={{color: settings.scriptUrl ? "var(--t)" : "var(--w3)"}}>
+          {settings.scriptUrl ? "✓ 내 전용 시트 연결됨" : "미연동 — 가이드를 참고하세요"}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══ Member Detail ═══ */
+function MemberDetail({ member, records, onBack, onToggle, fmt }) {
+  const cats = { I: 0, O: 0, C: 0 };
+  records.forEach(r => { const b = getBeh(r.behaviorId); if (b) cats[b.cat]++; });
+  const pending = records.flatMap(r => (r.actions||[]).filter(a => !a.done));
+
+  return (
+    <div>
+      <div className="md-top">
+        <button className="md-back" onClick={onBack}>← 목록</button>
+        <div className="md-prof">
+          <div className="md-av">{member.initial}</div>
+          <div><div className="md-name">{member.name}</div><div className="md-role">{member.role}</div></div>
+        </div>
+        <div className="md-stats">
+          {Object.entries(IOC).map(([k, v]) => (
+            <div className="md-stat" key={k} style={{ background: v.bg }}>
+              <div className="md-stat-v" style={{ color: v.color }}>{cats[k]}</div>
+              <div className="md-stat-l" style={{ color: v.color }}>{v.ko}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {pending.length > 0 && (
+        <>
+          <div className="sec-lbl">진행 중 액션 ({pending.length})</div>
+          <div style={{ padding: "0 20px 4px" }}>
+            {pending.map(a => {
+              const rec = records.find(r => r.actions?.some(x => x.id === a.id));
+              return (
+                <div className="rc-act" key={a.id}>
+                  <div className="rc-chk" onClick={() => rec && onToggle(rec.id, a.id)} />
+                  <span className="rc-act-t">{a.text}</span>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      <div className="sec-lbl">1:1 기록 ({records.length})</div>
+      {records.length === 0 ? (
+        <div className="empty"><b>💬</b><p>아직 기록이 없습니다.</p></div>
+      ) : (
+        records.map(r => <RecordCard key={r.id} rec={r} onToggle={(aId) => onToggle(r.id, aId)} fmt={fmt} />)
+      )}
+    </div>
+  );
+}
+
+/* ═══ Record Card ═══ */
+function RecordCard({ rec, onToggle, fmt }) {
+  const [open, setOpen] = useState(false);
+  const beh = getBeh(rec.behaviorId);
+
+  return (
+    <div className="rc">
+      <div className="rc-head">
+        <span className="rc-tag" style={{ background: "rgba(68,136,255,.12)", color: "var(--b)" }}>1:1</span>
+        <span className="rc-date">{fmt(rec.date)}</span>
+        {beh && <span className="rc-tag" style={{ background: beh.bg, color: beh.color }}>{beh.ko}</span>}
+        <button className="rc-toggle" onClick={() => setOpen(!open)}>{open ? "접기" : "더보기"}</button>
+      </div>
+      {rec.agenda && <div className="rc-agenda">{rec.agenda}</div>}
+      {beh && <div className="rc-beh" style={{ background: beh.bg, color: beh.color }}>{beh.title}</div>}
+      <div className="rc-body">{rec.content}</div>
+      {open && (
+        <>
+          {rec.memo && <div className="rc-memo"><div className="rc-memo-lbl">메모</div>{rec.memo}</div>}
+          {rec.actions?.length > 0 && (
+            <div><div className="rc-memo-lbl" style={{marginBottom:3}}>액션 아이템</div>
+              {rec.actions.map(a => (
+                <div className="rc-act" key={a.id}>
+                  <div className={`rc-chk ${a.done?"done":""}`} onClick={() => onToggle(a.id)}>
+                    {a.done && <svg width="8" height="6" viewBox="0 0 8 6" fill="none"><path d="M1 3l2 2 4-4" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                  </div>
+                  <span className={`rc-act-t ${a.done?"done":""}`}>{a.text}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ═══ Compose ═══ */
+function ComposeModal({ members, preselect, leaderName, onClose, onSave }) {
+  const [memberId, setMemberId] = useState(preselect);
+  const [selCat, setSelCat] = useState("");
+  const [behaviorId, setBehaviorId] = useState("");
+  const [agenda, setAgenda] = useState("");
+  const [content, setContent] = useState("");
+  const [memo, setMemo] = useState("");
+  const [actions, setActions] = useState([]);
+  const [actInput, setActInput] = useState("");
+
+  const addAct = () => { if (!actInput.trim()) return; setActions(p => [...p, {id:uid(),text:actInput.trim(),done:false}]); setActInput(""); };
+
+  return (
+    <div className="ov" onClick={e => e.target===e.currentTarget && onClose()}>
+      <div className="mo">
+        <div className="mo-bar"/>
+        <div className="mo-t">1:1 피드백 기록</div>
+
+        <div className="fg">
+          <label className="fl">팀원</label>
+          <select className="inp" value={memberId} onChange={e => setMemberId(e.target.value)} style={{appearance:"none"}}>
+            <option value="">선택</option>
+            {members.map(m => <option key={m.id} value={m.id}>{m.name} · {m.role}</option>)}
+          </select>
+        </div>
+
+        <div className="fg">
+          <label className="fl">아젠다 <small>대화 주제</small></label>
+          <input className="inp" placeholder="분기 목표 점검, 커리어 대화..." value={agenda} onChange={e => setAgenda(e.target.value)} />
+        </div>
+
+        <div className="fg">
+          <label className="fl">핵심가치 연결 <small>어떤 행동양식이 드러났나요?</small></label>
+          <div className="pill-r">
+            {Object.entries(IOC).map(([k, v]) => (
+              <button key={k} className={`pill ${selCat===k?"on":""}`}
+                style={selCat===k ? {background:v.color,borderColor:v.color} : {color:v.color,borderColor:v.color+"44"}}
+                onClick={() => {setSelCat(selCat===k?"":k);setBehaviorId("");}}>
+                {v.ko}
+              </button>
+            ))}
+          </div>
+          {selCat && (
+            <div className="beh-sel">
+              {IOC[selCat].behaviors.map(b => (
+                <div key={b.id} className={`beh-opt ${behaviorId===b.id?"on":""}`}
+                  style={behaviorId===b.id ? {borderColor:IOC[selCat].color,background:IOC[selCat].bg} : {}}
+                  onClick={() => setBehaviorId(behaviorId===b.id?"":b.id)}>
+                  <div className="beh-opt-t" style={behaviorId===b.id?{color:IOC[selCat].color}:{color:"var(--w7)"}}>{b.title}</div>
+                  <div className="beh-opt-d">{b.desc}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="fg">
+          <label className="fl">피드백 내용 <small>구체적인 상황·행동·영향을 담아주세요</small></label>
+          <textarea className="inp ta" style={{minHeight:80}} placeholder="예: 이번 스프린트 회고에서 팀원이 먼저 리스크를 짚어줬고..." value={content} onChange={e => setContent(e.target.value)} />
+        </div>
+
+        <div className="fg">
+          <label className="fl">메모 <small>대화 내용, 합의 사항</small></label>
+          <textarea className="inp ta" placeholder="자유롭게 기록..." value={memo} onChange={e => setMemo(e.target.value)} />
+        </div>
+
+        <div className="fg">
+          <label className="fl">액션 아이템</label>
+          <div className="act-add">
+            <input className="inp inp-sm" style={{flex:1}} placeholder="다음에 할 일..." value={actInput} onChange={e => setActInput(e.target.value)} onKeyDown={e => e.key==="Enter" && addAct()} />
+            <button className="btn btn-sm btn-s" onClick={addAct}>추가</button>
+          </div>
+          {actions.length > 0 && <div className="act-list">{actions.map(a => (
+            <div className="act-item" key={a.id}><span>• {a.text}</span><button className="act-rm" onClick={() => setActions(p => p.filter(x=>x.id!==a.id))}>✕</button></div>
+          ))}</div>}
+        </div>
+
+        <div className="btn-r">
+          <button className="btn btn-c" onClick={onClose}>취소</button>
+          <button className="btn btn-s" disabled={!memberId || !content.trim()} onClick={() => {
+            const m = members.find(x=>x.id===memberId);
+            onSave({ id:uid(), memberId, memberName:m?.name||"", leader:leaderName, behaviorId, agenda, content:content.trim(), memo, actions, date:Date.now() });
+          }}>저장</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
