@@ -63,10 +63,10 @@ function sSet(key, val) {
 }
 
 /* ── Google Sheets sync ── */
-async function gsSync(url, leader) {
+async function gsSync(url) {
   if (!url) return null;
   try {
-    const r = await fetch(url + "?action=get&leader=" + encodeURIComponent(leader));
+    const r = await fetch(url + "?action=get", { redirect: "follow" });
     if (!r.ok) return null;
     return await r.json();
   } catch { return null; }
@@ -77,9 +77,8 @@ async function gsPush(url, payload) {
   try {
     await fetch(url, {
       method: "POST",
-      mode: "no-cors",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: "data=" + encodeURIComponent(JSON.stringify(payload)),
+      body: JSON.stringify(payload),
+      headers: { "Content-Type": "text/plain" },
     });
   } catch {}
 }
@@ -258,33 +257,75 @@ function Logo() {
 /* ════════════════════════════════════════════════════════════════ */
 
 function App() {
-  const [settings, setSettings] = useState({ leaderName: "", scriptUrl: "" });
-  const [members, setMembers] = useState([]);
-  const [records, setRecords] = useState([]);
-  const [loaded, setLoaded] = useState(false);
+  const [currentUser, setCurrentUser] = useState(() => {
+    try { return localStorage.getItem("playio-current-user") || ""; } catch { return ""; }
+  });
+
+  if (!currentUser) {
+    return <LoginScreen onLogin={(name) => {
+      localStorage.setItem("playio-current-user", name);
+      setCurrentUser(name);
+    }} />;
+  }
+
+  return <MainApp currentUser={currentUser} onLogout={() => {
+    localStorage.removeItem("playio-current-user");
+    setCurrentUser("");
+  }} />;
+}
+
+function LoginScreen({ onLogin }) {
+  const [name, setName] = useState("");
+  return (
+    <div className="app">
+      <style>{CSS}</style>
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+        <div style={{ width: "100%", maxWidth: 360, textAlign: "center" }}>
+          <Logo />
+          <h1 style={{ fontSize: 22, fontWeight: 800, margin: "16px 0 6px" }}>1:1 Feedback</h1>
+          <p style={{ fontSize: 13, color: "var(--w3)", marginBottom: 28 }}>본인 이름을 입력하면<br/>개인 전용 화면이 열립니다.</p>
+          <input
+            className="inp"
+            placeholder="이름 입력 (예: 홍길동)"
+            value={name}
+            onChange={e => setName(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && name.trim() && onLogin(name.trim())}
+            style={{ textAlign: "center", fontSize: 15, padding: 12, marginBottom: 12 }}
+          />
+          <button
+            className="btn btn-s"
+            style={{ width: "100%", padding: 12, fontSize: 14 }}
+            disabled={!name.trim()}
+            onClick={() => onLogin(name.trim())}
+          >시작하기</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MainApp({ currentUser, onLogout }) {
+  const uKey = (k) => `playio-${currentUser}-${k}`;
+  
+  const [settings, setSettings] = useState(() => {
+    try { const v = localStorage.getItem(uKey("settings")); return v ? JSON.parse(v) : { leaderName: currentUser, scriptUrl: "" }; } catch { return { leaderName: currentUser, scriptUrl: "" }; }
+  });
+  const [members, setMembers] = useState(() => {
+    try { const v = localStorage.getItem(uKey("members")); return v ? JSON.parse(v) : []; } catch { return []; }
+  });
+  const [records, setRecords] = useState(() => {
+    try { const v = localStorage.getItem(uKey("records")); return v ? JSON.parse(v) : []; } catch { return []; }
+  });
   const [tab, setTab] = useState("values");
   const [view, setView] = useState("list");
   const [selM, setSelM] = useState(null);
   const [compose, setCompose] = useState(false);
   const [toast, setToast] = useState("");
 
-  /* ── load ── */
-  useEffect(() => {
-    (async () => {
-      const s = sGet("playio-settings");
-      const m = sGet("playio-members");
-      const r = sGet("playio-records");
-      if (s) setSettings(s);
-      if (m) setMembers(m);
-      if (r) setRecords(r);
-      setLoaded(true);
-    })();
-  }, []);
-
-  /* ── save ── */
-  useEffect(() => { if (loaded) sSet("playio-settings", settings); }, [settings, loaded]);
-  useEffect(() => { if (loaded) sSet("playio-members", members); }, [members, loaded]);
-  useEffect(() => { if (loaded) sSet("playio-records", records); }, [records, loaded]);
+  /* ── save (per-user) ── */
+  useEffect(() => { try { localStorage.setItem(uKey("settings"), JSON.stringify(settings)); } catch {} }, [settings]);
+  useEffect(() => { try { localStorage.setItem(uKey("members"), JSON.stringify(members)); } catch {} }, [members]);
+  useEffect(() => { try { localStorage.setItem(uKey("records"), JSON.stringify(records)); } catch {} }, [records]);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2200); };
 
@@ -293,15 +334,15 @@ function App() {
     if (!settings.scriptUrl) return;
     await gsPush(settings.scriptUrl, {
       action: "addRecord",
-      leader: settings.leaderName,
+      leader: currentUser,
       record: newRec,
     });
-  }, [settings]);
+  }, [settings, currentUser]);
 
   const syncFromSheet = useCallback(async () => {
-    if (!settings.scriptUrl || !settings.leaderName) { showToast("스크립트 URL과 이름을 먼저 입력하세요"); return; }
+    if (!settings.scriptUrl) { showToast("스크립트 URL을 먼저 입력하세요"); return; }
     showToast("동기화 중...");
-    const result = await gsSync(settings.scriptUrl, settings.leaderName);
+    const result = await gsSync(settings.scriptUrl);
     if (result?.records) {
       setRecords(prev => {
         const ids = new Set(prev.map(r => r.id));
@@ -318,7 +359,7 @@ function App() {
     if (!settings.scriptUrl) return;
     await gsPush(settings.scriptUrl, {
       action: "pushAll",
-      leader: settings.leaderName,
+      leader: currentUser,
       members,
       records,
     });
@@ -365,7 +406,10 @@ function App() {
       <div className="hd">
         <Logo />
         <h1>1:1 Feedback<span>Playio</span></h1>
-        {settings.leaderName && <span style={{marginLeft:"auto",fontSize:12,color:"var(--w3)"}}>{settings.leaderName}</span>}
+        <span style={{marginLeft:"auto",fontSize:12,color:"var(--w5)",display:"flex",alignItems:"center",gap:8}}>
+          {currentUser}
+          <button onClick={onLogout} style={{border:0,background:"var(--w1)",color:"var(--w3)",padding:"3px 8px",borderRadius:4,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>전환</button>
+        </span>
       </div>
 
       <div className="tabs">
@@ -381,6 +425,7 @@ function App() {
           <SettingsView
             settings={settings}
             members={members}
+            currentUser={currentUser}
             onUpdateSettings={setSettings}
             onAddMember={addMember}
             onRemoveMember={removeMember}
@@ -534,7 +579,7 @@ function App() {
         <ComposeModal
           members={members}
           preselect={selM?.id || ""}
-          leaderName={settings.leaderName}
+          leaderName={currentUser}
           onClose={() => setCompose(false)}
           onSave={(r) => { addRecord(r); setCompose(false); }}
         />
@@ -666,7 +711,7 @@ function DashboardView({ members, records, fmt }) {
 }
 
 /* ═══ Settings ═══ */
-function SettingsView({ settings, members, onUpdateSettings, onAddMember, onRemoveMember, onSync, onPushAll }) {
+function SettingsView({ settings, members, currentUser, onUpdateSettings, onAddMember, onRemoveMember, onSync, onPushAll }) {
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
 
@@ -675,8 +720,9 @@ function SettingsView({ settings, members, onUpdateSettings, onAddMember, onRemo
       <div className="set-t">기본 설정</div>
 
       <div className="fg">
-        <label className="fl">내 이름 (팀장)</label>
-        <input className="inp" placeholder="홍길동" value={settings.leaderName} onChange={e => onUpdateSettings(p => ({...p, leaderName: e.target.value}))} />
+        <label className="fl">사용자</label>
+        <div style={{ padding: "10px 12px", background: "var(--bk3)", borderRadius: "var(--rs)", fontSize: 14, fontWeight: 600, color: "var(--w9)", border: "1.5px solid var(--w1)" }}>{currentUser}</div>
+        <div style={{ fontSize: 11, color: "var(--w3)", marginTop: 4 }}>다른 계정으로 전환하려면 상단의 "전환" 버튼을 누르세요</div>
       </div>
 
       <div className="set-sub">팀원 관리 ({members.length}명)</div>
