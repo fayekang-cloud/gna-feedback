@@ -11,7 +11,7 @@
 </head>
 <body>
   <div id="root"></div>
-  <script type="text/babel" data-type="module">
+  <script type="text/babel">
 const { useState, useEffect, useCallback } = React;
 
 /* ── utils ── */
@@ -54,13 +54,7 @@ function getBeh(id) {
   return null;
 }
 
-/* ── storage helper ── */
-function sGet(key) {
-  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; } catch { return null; }
-}
-function sSet(key, val) {
-  try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
-}
+/* ── storage: per-user localStorage ── */
 
 /* ── Google Sheets sync ── */
 async function gsSync(url) {
@@ -69,7 +63,7 @@ async function gsSync(url) {
     const r = await fetch(url + "?action=get", { redirect: "follow" });
     if (!r.ok) return null;
     return await r.json();
-  } catch { return null; }
+  } catch(e) { return null; }
 }
 
 async function gsPush(url, payload) {
@@ -80,7 +74,7 @@ async function gsPush(url, payload) {
       body: JSON.stringify(payload),
       headers: { "Content-Type": "text/plain" },
     });
-  } catch {}
+  } catch(e) {}
 }
 
 /* ── CSS ── */
@@ -258,7 +252,7 @@ function Logo() {
 
 function App() {
   const [currentUser, setCurrentUser] = useState(() => {
-    try { return localStorage.getItem("playio-current-user") || ""; } catch { return ""; }
+    try { return localStorage.getItem("playio-current-user") || ""; } catch(e) { return ""; }
   });
 
   if (!currentUser) {
@@ -308,13 +302,13 @@ function MainApp({ currentUser, onLogout }) {
   const uKey = (k) => `playio-${currentUser}-${k}`;
   
   const [settings, setSettings] = useState(() => {
-    try { const v = localStorage.getItem(uKey("settings")); return v ? JSON.parse(v) : { leaderName: currentUser, scriptUrl: "" }; } catch { return { leaderName: currentUser, scriptUrl: "" }; }
+    try { const v = localStorage.getItem(uKey("settings")); return v ? JSON.parse(v) : { leaderName: currentUser, scriptUrl: "" }; } catch(e) { return { leaderName: currentUser, scriptUrl: "" }; }
   });
   const [members, setMembers] = useState(() => {
-    try { const v = localStorage.getItem(uKey("members")); return v ? JSON.parse(v) : []; } catch { return []; }
+    try { const v = localStorage.getItem(uKey("members")); return v ? JSON.parse(v) : []; } catch(e) { return []; }
   });
   const [records, setRecords] = useState(() => {
-    try { const v = localStorage.getItem(uKey("records")); return v ? JSON.parse(v) : []; } catch { return []; }
+    try { const v = localStorage.getItem(uKey("records")); return v ? JSON.parse(v) : []; } catch(e) { return []; }
   });
   const [tab, setTab] = useState("values");
   const [view, setView] = useState("list");
@@ -323,9 +317,9 @@ function MainApp({ currentUser, onLogout }) {
   const [toast, setToast] = useState("");
 
   /* ── save (per-user) ── */
-  useEffect(() => { try { localStorage.setItem(uKey("settings"), JSON.stringify(settings)); } catch {} }, [settings]);
-  useEffect(() => { try { localStorage.setItem(uKey("members"), JSON.stringify(members)); } catch {} }, [members]);
-  useEffect(() => { try { localStorage.setItem(uKey("records"), JSON.stringify(records)); } catch {} }, [records]);
+  useEffect(() => { try { localStorage.setItem(uKey("settings"), JSON.stringify(settings)); } catch(e) {} }, [settings]);
+  useEffect(() => { try { localStorage.setItem(uKey("members"), JSON.stringify(members)); } catch(e) {} }, [members]);
+  useEffect(() => { try { localStorage.setItem(uKey("records"), JSON.stringify(records)); } catch(e) {} }, [records]);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2200); };
 
@@ -942,7 +936,7 @@ function ComposeModal({ members, preselect, leaderName, onClose, onSave }) {
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
   </script>
 </body>
 </html>
